@@ -1,3 +1,7 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings, use_super_parameters, library_private_types_in_public_api
+
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,7 +25,9 @@ void main() async {
       return db;
     },
   );
+  log('Client before initialized ${client.identityKey}');
   await client.init();
+  log('Client initialized ${client.identityKey}');
   runApp(MatrixExampleChat(client: client));
 }
 
@@ -63,7 +69,7 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final client = Provider.of<Client>(context, listen: false);
-      await client.checkHomeserver(Uri.parse('http://192.168.1.18:8008'));
+      await client.checkHomeserver(Uri.parse(_homeserverTextField.text.trim()));
       await client.login(
         LoginType.mLoginPassword,
         password: _passwordTextField.text,
@@ -150,6 +156,7 @@ class RoomListPage extends StatefulWidget {
 
 class _RoomListPageState extends State<RoomListPage> {
   void _logout() async {
+    log('Logging out');
     final client = Provider.of<Client>(context, listen: false);
     await client.logout();
     Navigator.of(context).pushAndRemoveUntil(
@@ -168,6 +175,8 @@ class _RoomListPageState extends State<RoomListPage> {
       ),
     );
   }
+
+  // create  a function that take a uri of an imag
 
   @override
   Widget build(BuildContext context) {
@@ -193,40 +202,45 @@ class _RoomListPageState extends State<RoomListPage> {
       body: StreamBuilder(
         stream: client.onSync.stream,
         builder: (context, _) => ListView.builder(
-          itemCount: client.rooms.length,
-          itemBuilder: (context, i) => ListTile(
-            leading: CircleAvatar(
-              foregroundImage: client.rooms[i].avatar == null
-                  ? null
-                  : NetworkImage(client.rooms[i].avatar!
-                      .getThumbnail(
-                        client,
-                        width: 56,
-                        height: 56,
-                      )
-                      .toString()),
-            ),
-            title: Row(
-              children: [
-                Expanded(child: Text(client.rooms[i].displayname)),
-                if (client.rooms[i].notificationCount > 0)
-                  Material(
-                      borderRadius: BorderRadius.circular(99),
-                      color: Colors.red,
-                      child: Padding(
-                        padding: const EdgeInsets.all(2.0),
-                        child:
-                            Text(client.rooms[i].notificationCount.toString()),
-                      ))
-              ],
-            ),
-            subtitle: Text(
-              client.rooms[i].lastEvent?.body ?? 'No messages',
-              maxLines: 1,
-            ),
-            onTap: () => _join(client.rooms[i]),
-          ),
-        ),
+            itemCount: client.rooms.length,
+            itemBuilder: (context, i) {
+              final room = client.rooms[i];
+              final avatar = room.avatar;
+              return ListTile(
+                // leading: CircleAvatar(
+                //   foregroundImage: s.isEmpty
+                //       ? null
+                //       : NetworkImage(
+                //           s,
+                //           headers: {
+                //             'Authorization': 'Bearer ${client.accessToken}',
+                //           },
+                //         ),
+                // ),
+                leading: avatar != null
+                    ? DisplayNetworkImage(uri: avatar)
+                    : CircleAvatar(),
+                title: Row(
+                  children: [
+                    Expanded(child: Text(client.rooms[i].displayname)),
+                    if (client.rooms[i].notificationCount > 0)
+                      Material(
+                          borderRadius: BorderRadius.circular(99),
+                          color: Colors.red,
+                          child: Padding(
+                            padding: const EdgeInsets.all(2.0),
+                            child: Text(
+                                client.rooms[i].notificationCount.toString()),
+                          ))
+                  ],
+                ),
+                subtitle: Text(
+                  client.rooms[i].lastEvent?.body ?? 'No messages',
+                  maxLines: 1,
+                ),
+                onTap: () => _join(client.rooms[i]),
+              );
+            }),
       ),
     );
   }
@@ -318,8 +332,7 @@ class _RoomListPageState extends State<RoomListPage> {
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final rooms = snapshot
-                  .data!.chunk; // Updated to use .rooms instead of .chunk
+              final rooms = snapshot.data!.chunk;
               return ListView.builder(
                 shrinkWrap: true,
                 itemCount: rooms.length,
@@ -361,6 +374,43 @@ class _RoomListPageState extends State<RoomListPage> {
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class DisplayNetworkImage extends StatefulWidget {
+  const DisplayNetworkImage({super.key, required this.uri});
+  final Uri uri;
+
+  @override
+  State<DisplayNetworkImage> createState() => _DisplayNetworkImageState();
+}
+
+class _DisplayNetworkImageState extends State<DisplayNetworkImage> {
+  late Uri downloadUri;
+
+  @override
+  void initState() {
+    super.initState();
+    final client = Provider.of<Client>(context, listen: false);
+
+    widget.uri.getDownloadUri(client).then((value) {
+      setState(() {
+        downloadUri = value;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final client = Provider.of<Client>(context, listen: false);
+    return CircleAvatar(
+      foregroundImage: NetworkImage(
+        downloadUri.toString(),
+        headers: {
+          'Authorization': 'Bearer ${client.accessToken}',
+        },
       ),
     );
   }
@@ -501,56 +551,43 @@ class _RoomPageState extends State<RoomPage> {
                       const Divider(height: 1),
                       Expanded(
                         child: AnimatedList(
-                          key: _listKey,
-                          reverse: true,
-                          initialItemCount: timeline.events.length,
-                          itemBuilder: (context, i, animation) => timeline
-                                      .events[i].relationshipEventId !=
-                                  null
-                              ? Container()
-                              : ScaleTransition(
-                                  scale: animation,
-                                  child: Opacity(
-                                    opacity: timeline.events[i].status.isSent
-                                        ? 1
-                                        : 0.5,
-                                    child: ListTile(
-                                      leading: CircleAvatar(
-                                        foregroundImage: timeline.events[i]
-                                                    .sender.avatarUrl ==
-                                                null
-                                            ? null
-                                            : NetworkImage(timeline
-                                                .events[i].sender.avatarUrl!
-                                                .getThumbnail(
-                                                  widget.room.client,
-                                                  width: 56,
-                                                  height: 56,
-                                                )
-                                                .toString()),
-                                      ),
-                                      title: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(timeline
-                                                .events[i].sender
-                                                .calcDisplayname()),
+                            key: _listKey,
+                            reverse: true,
+                            initialItemCount: timeline.events.length,
+                            itemBuilder: (context, i, animation) {
+                              final event = timeline.events[i];
+                              if (event.relationshipEventId != null) {
+                                log('Skipping ${event.relationshipEventId}');
+                                return Container();
+                              }
+                              return ScaleTransition(
+                                scale: animation,
+                                child: Opacity(
+                                  opacity: event.status.isSent ? 1 : 0.5,
+                                  child: ListTile(
+                                    leading: CircleAvatar(),
+                                    title: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            event.senderFromMemoryOrFallback
+                                                .calcDisplayname(),
                                           ),
-                                          Text(
-                                            timeline.events[i].originServerTs
-                                                .toIso8601String(),
-                                            style:
-                                                const TextStyle(fontSize: 10),
-                                          ),
-                                        ],
-                                      ),
-                                      subtitle: Text(timeline.events[i]
-                                          .getDisplayEvent(timeline)
-                                          .body),
+                                        ),
+                                        Text(
+                                          event.originServerTs
+                                              .toIso8601String(),
+                                          style: const TextStyle(fontSize: 10),
+                                        ),
+                                      ],
+                                    ),
+                                    subtitle: Text(
+                                      event.getDisplayEvent(timeline).body,
                                     ),
                                   ),
                                 ),
-                        ),
+                              );
+                            }),
                       ),
                     ],
                   );
